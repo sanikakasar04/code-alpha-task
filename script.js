@@ -1,28 +1,45 @@
-var d1=document.getElementById('date').Value;
-var m1=document.getElementById('month').Value;
-var y1=document.getElementById('year').Value;
+// Select all the elements in the HTML page
+// and assign them to a variable
+let now_playing = document.querySelector(".now-playing");
+let track_art = document.querySelector(".track-art");
+let track_name = document.querySelector(".track-name");
+let track_artist = document.querySelector(".track-artist");
 
-function age() {
-    var d1 =document.getElementById('date').value;
-    var m1 =document.getElementById('month').value;
-    var y1 =document.getElementById('year').value;
+let playpause_btn = document.querySelector(".playpause-track");
+let next_btn = document.querySelector(".next-track");
+let prev_btn = document.querySelector(".prev-track");
 
-    var date = new Date();
-    var d2 = date.getDate();
-    var m2 = 1+ date.getMonth();
-    var y2 = date.getFullYear();
-    var month  =[31,28,31,30,31,30,31,31,30,31,30,31]
-    if (d1>d2){
-        d2 = d2+month[m2-1];
-        m2 = m2-1;
-    }
-    if (m1>m2){
-        m2 = m2 +12;
-        y2 = y2-1;
-    }
-    var d =d2-d1;
-    var m =m2-m1;
-    var y =y2-y1;
-    document.getElementById('age').innerHTML='your age is '+y+' years '+m+' months '+d+' days'
-}
-    
+let seek_slider = document.querySelector(".seek_slider");
+let volume_slider = document.querySelector(".volume_slider");
+let curr_time = document.querySelector(".current-time");
+let total_duration = document.querySelector(".total-duration");
+
+// Specify globally used values
+let track_index = 0;
+let isPlaying = false;
+let updateTimer;
+
+// Create the audio element for the player
+let curr_track = document.createElement('audio');
+
+// Define the list of tracks that have to be played
+let track_list = [
+  {
+    name: "Night Owl",
+    artist: "Broke For Free",
+    image: "Image URL",
+    path: "Night_Owl.mp3"
+  },
+  {
+    name: "Enthusiast",
+    artist: "Tours",
+    image: "Image URL",
+    path: "Enthusiast.mp3"
+  },
+  {
+    name: "Shipping Lanes",
+    artist: "Chad Crouch",
+    image: "Image URL",
+    path: "Shipping_Lanes.mp3",
+  },
+];
