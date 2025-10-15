@@ -1,57 +1,508 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <title>Simple Music Player</title>
-  <!-- Load FontAwesome icons -->
-  <link rel="stylesheet" 
-        href=
-"https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.13.0/css/all.min.css">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-Time Video Communication (WebRTC + Firestore)</title>
+    <!-- Load Tailwind CSS for modern, responsive styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom styles for the app */
+        .video-container {
+            position: relative;
+            background-color: #1f2937; /* Dark gray background */
+            border-radius: 1rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            overflow: hidden;
+        }
 
-  <!-- Load the custom CSS style file -->
-  <link rel="stylesheet" type="text/css" href="style.css">
+        #localVideo {
+            width: 150px;
+            height: 112px;
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            border-radius: 0.5rem;
+            z-index: 10;
+            object-fit: cover;
+            border: 3px solid #6366f1; /* Indigo border */
+            transform: scaleX(-1); /* Mirror local video */
+        }
+
+        #remoteVideo {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1); /* Mirror remote video */
+        }
+        
+        /* Ensure the main container is flexible and centered */
+        html, body, #app {
+            height: 100%;
+        }
+        
+        /* Message box styling */
+        .message-box {
+            padding: 0.5rem;
+            border-radius: 0.5rem;
+            margin-top: 1rem;
+            text-align: center;
+        }
+    </style>
 </head>
-<body>
-  <div class="player">
+<body class="bg-gray-100 dark:bg-gray-900 flex items-center justify-center min-h-screen p-4 font-sans">
 
-    <!-- Define the section for displaying details -->
-    <div class="details">
-      <div class="now-playing">PLAYING x OF y</div>
-      <div class="track-art"></div>
-      <div class="track-name">Track Name</div>
-      <div class="track-artist">Track Artist</div>
+    <!-- Main Application Container -->
+    <div id="app" class="w-full max-w-4xl bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-6 lg:p-8">
+        <h1 class="text-3xl font-extrabold text-indigo-600 dark:text-indigo-400 mb-6 text-center">
+            Secure Video Call App
+        </h1>
+
+        <!-- Call ID and Status -->
+        <div class="mb-6">
+            <div id="statusMessage" class="message-box bg-yellow-100 text-yellow-800 dark:bg-yellow-800 dark:text-yellow-100 font-medium hidden">
+                Initializing...
+            </div>
+            <label for="callIdInput" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 mt-4">
+                Call ID (Share this with your partner)
+            </label>
+            <input type="text" id="callIdInput" placeholder="Enter or generate a call ID" class="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 bg-gray-50 dark:bg-gray-700 dark:text-white">
+        </div>
+
+        <!-- Video Display Area -->
+        <div class="video-container h-80 lg:h-[400px] mb-6">
+            <video id="remoteVideo" autoplay playsinline class="rounded-xl"></video>
+            <video id="localVideo" muted autoplay playsinline class="rounded-lg"></video>
+        </div>
+
+        <!-- Controls -->
+        <div class="flex flex-wrap justify-center gap-3">
+            <button id="createCallButton" class="flex-1 min-w-[120px] bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-6 rounded-xl transition duration-150 shadow-md shadow-indigo-500/50 disabled:bg-gray-400">
+                <span class="text-sm">📞 Create Call</span>
+            </button>
+            <button id="answerCallButton" class="flex-1 min-w-[120px] bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-xl transition duration-150 shadow-md shadow-green-500/50 disabled:bg-gray-400">
+                <span class="text-sm">🤝 Join Call</span>
+            </button>
+            <button id="hangupButton" class="flex-1 min-w-[120px] bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-xl transition duration-150 shadow-md shadow-red-500/50 disabled:bg-gray-400" disabled>
+                <span class="text-sm">✋ Hang Up</span>
+            </button>
+        </div>
     </div>
 
-    <!-- Define the section for displaying track buttons -->
-    <div class="buttons">
-      <div class="prev-track" onclick="prevTrack()">
-        <i class="fa fa-step-backward fa-2x"></i>
-      </div>
-      <div class="playpause-track" onclick="playpauseTrack()">
-        <i class="fa fa-play-circle fa-5x"></i>
-      </div>
-      <div class="next-track" onclick="nextTrack()">
-        <i class="fa fa-step-forward fa-2x"></i>
-      </div>
-    </div>
+    <!-- Firebase and WebRTC Logic -->
+    <script type="module">
+        // Global environment variables provided by the Canvas environment
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
-    <!-- Define the section for displaying the seek slider-->
-    <div class="slider_container">
-      <div class="current-time">00:00</div>
-      <input type="range" min="1" max="100"
-        value="0" class="seek_slider" onchange="seekTo()">
-      <div class="total-duration">00:00</div>
-    </div>
+        // Firebase Imports
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, setPersistence, browserSessionPersistence } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, collection, onSnapshot, updateDoc, arrayUnion, query, limit, getDocs, getDoc, deleteDoc, runTransaction, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-    <!-- Define the section for displaying the volume slider-->
-    <div class="slider_container">
-      <i class="fa fa-volume-down"></i>
-      <input type="range" min="1" max="100"
-        value="99" class="volume_slider" onchange="setVolume()">
-      <i class="fa fa-volume-up"></i>
-    </div>
-  </div>
+        // === DOM Elements ===
+        const localVideo = document.getElementById('localVideo');
+        const remoteVideo = document.getElementById('remoteVideo');
+        const callIdInput = document.getElementById('callIdInput');
+        const createCallButton = document.getElementById('createCallButton');
+        const answerCallButton = document.getElementById('answerCallButton');
+        const hangupButton = document.getElementById('hangupButton');
+        const statusMessage = document.getElementById('statusMessage');
 
-  <!-- Load the main script for the player -->
-  <script src="main.js"></script>
+        // === Global State ===
+        let db;
+        let auth;
+        let localStream = null;
+        let remoteStream = null;
+        let peerConnection = null;
+        let currentCallId = null;
+        let unsubscribeCandidates = [];
+        let userId = null;
+
+        // STUN/TURN server configuration (Using public Google STUN server)
+        const iceServers = {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                // You would add TURN servers here for complex NAT traversal
+            ]
+        };
+
+        // === Utility Functions ===
+
+        /**
+         * Displays a status message to the user.
+         * @param {string} message - The message to display.
+         * @param {string} type - 'info', 'success', or 'error'.
+         */
+        function updateStatus(message, type = 'info') {
+            statusMessage.textContent = message;
+            statusMessage.classList.remove('hidden', 'bg-red-100', 'text-red-800', 'bg-green-100', 'text-green-800', 'bg-yellow-100', 'text-yellow-800');
+
+            let newClasses = [];
+            switch (type) {
+                case 'success':
+                    newClasses.push('bg-green-100', 'text-green-800', 'dark:bg-green-800', 'dark:text-green-100');
+                    break;
+                case 'error':
+                    newClasses.push('bg-red-100', 'text-red-800', 'dark:bg-red-800', 'dark:text-red-100');
+                    break;
+                case 'info':
+                default:
+                    newClasses.push('bg-yellow-100', 'text-yellow-800', 'dark:bg-yellow-800', 'dark:text-yellow-100');
+                    break;
+            }
+            statusMessage.classList.add(...newClasses);
+            statusMessage.classList.remove('hidden');
+        }
+
+        /**
+         * Generates a simple, readable 5-digit call ID.
+         */
+        function generateCallId() {
+            return Math.random().toString(36).substring(2, 7).toUpperCase();
+        }
+
+        /**
+         * Resets the UI and state after a call.
+         */
+        function resetState() {
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+            }
+            if (peerConnection) {
+                peerConnection.close();
+            }
+            unsubscribeCandidates.forEach(unsub => unsub());
+            unsubscribeCandidates = [];
+            
+            localStream = null;
+            peerConnection = null;
+            localVideo.srcObject = null;
+            remoteVideo.srcObject = null;
+            remoteVideo.pause();
+
+            currentCallId = null;
+            callIdInput.value = '';
+            
+            createCallButton.disabled = false;
+            answerCallButton.disabled = false;
+            hangupButton.disabled = true;
+            updateStatus('Ready to start or join a call.', 'success');
+        }
+
+        // === WebRTC Functions ===
+
+        /**
+         * Sets up the local camera and microphone stream.
+         */
+        async function setupLocalStream() {
+            try {
+                updateStatus('Requesting local media access...');
+                localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                localVideo.srcObject = localStream;
+                updateStatus('Local media stream active.', 'info');
+                return true;
+            } catch (error) {
+                console.error('Error accessing media devices:', error);
+                updateStatus(`Error: Could not access camera/mic. Details: ${error.name}`, 'error');
+                return false;
+            }
+        }
+
+        /**
+         * Initializes RTCPeerConnection and sets up listeners.
+         * @param {string} callId - The ID of the Firestore call document.
+         * @param {boolean} isCaller - True if creating the call, false if answering.
+         */
+        function setupPeerConnection(callId, isCaller) {
+            if (peerConnection) peerConnection.close();
+            
+            peerConnection = new RTCPeerConnection(iceServers);
+            const callDoc = doc(db, 'artifacts', appId, 'public', 'data', 'calls', callId);
+
+            // 1. Add local tracks to the peer connection
+            if (localStream) {
+                localStream.getTracks().forEach(track => {
+                    peerConnection.addTrack(track, localStream);
+                });
+            }
+
+            // 2. Handle remote tracks
+            peerConnection.ontrack = (event) => {
+                // Display remote stream when it arrives
+                if (event.streams && event.streams[0]) {
+                    remoteVideo.srcObject = event.streams[0];
+                    remoteStream = event.streams[0];
+                    updateStatus('Remote stream connected.', 'success');
+                }
+            };
+            
+            // 3. Handle ICE Candidate generation (network info)
+            peerConnection.onicecandidate = async (event) => {
+                if (event.candidate) {
+                    // Send local ICE candidates to Firestore
+                    const candidatePayload = event.candidate.toJSON();
+                    if (isCaller) {
+                        await updateDoc(callDoc, {
+                            offerCandidates: arrayUnion(candidatePayload)
+                        });
+                    } else {
+                        await updateDoc(callDoc, {
+                            answerCandidates: arrayUnion(candidatePayload)
+                        });
+                    }
+                }
+            };
+
+            // 4. Listen for ICE Candidates from the remote peer (Signaling)
+            const remoteCandidatesCollection = isCaller 
+                ? 'answerCandidates' 
+                : 'offerCandidates';
+
+            // Function to handle candidate subscription
+            const unsubscribe = onSnapshot(callDoc, (snapshot) => {
+                const data = snapshot.data();
+                if (data && data[remoteCandidatesCollection]) {
+                    data[remoteCandidatesCollection].forEach(candidate => {
+                        const iceCandidate = new RTCIceCandidate(candidate);
+                        peerConnection.addIceCandidate(iceCandidate).catch(e => console.error('Error adding received ICE candidate:', e));
+                    });
+                    // Clear the candidates array in Firestore after processing to prevent reprocessing
+                    // Note: In a production app, you might use subcollections for better management.
+                    if (data[remoteCandidatesCollection].length > 0) {
+                        const clearObject = {};
+                        clearObject[remoteCandidatesCollection] = [];
+                        updateDoc(callDoc, clearObject).catch(e => console.error('Failed to clear candidates:', e));
+                    }
+                }
+            });
+            unsubscribeCandidates.push(unsubscribe);
+
+            // 5. Handle call state changes
+            peerConnection.onconnectionstatechange = () => {
+                console.log('Peer connection state:', peerConnection.connectionState);
+                if (peerConnection.connectionState === 'connected') {
+                    updateStatus('Connection established! Video streaming started.', 'success');
+                } else if (peerConnection.connectionState === 'disconnected' || peerConnection.connectionState === 'closed') {
+                    updateStatus('Call disconnected.', 'info');
+                    // Automatically clean up if disconnected
+                    if (currentCallId) {
+                        deleteCall(currentCallId);
+                    }
+                    resetState();
+                } else if (peerConnection.connectionState === 'failed') {
+                    updateStatus('Connection failed. Please try again.', 'error');
+                    if (currentCallId) {
+                        deleteCall(currentCallId);
+                    }
+                    resetState();
+                }
+            };
+        }
+
+
+        // === Firestore Signaling Functions ===
+
+        /**
+         * Deletes the Firestore document for the current call.
+         * @param {string} callId - The ID of the call to delete.
+         */
+        async function deleteCall(callId) {
+            try {
+                const callDoc = doc(db, 'artifacts', appId, 'public', 'data', 'calls', callId);
+                await deleteDoc(callDoc);
+                console.log(`Call document ${callId} deleted.`);
+            } catch (e) {
+                console.error('Error deleting call document:', e);
+            }
+        }
+
+        /**
+         * Initiates a new call by creating an SDP offer and writing it to Firestore.
+         */
+        async function createCall() {
+            const hasMedia = await setupLocalStream();
+            if (!hasMedia) return;
+
+            const newCallId = generateCallId();
+            currentCallId = newCallId;
+            callIdInput.value = newCallId;
+
+            updateStatus(`Creating call with ID: ${newCallId}. Waiting for answer...`, 'info');
+            createCallButton.disabled = true;
+            answerCallButton.disabled = true;
+            hangupButton.disabled = false;
+
+            setupPeerConnection(newCallId, true);
+            const callDoc = doc(db, 'artifacts', appId, 'public', 'data', 'calls', newCallId);
+            
+            // 1. Create Offer
+            const offer = await peerConnection.createOffer();
+            await peerConnection.setLocalDescription(offer);
+
+            // 2. Write Offer to Firestore
+            await setDoc(callDoc, { 
+                offer: {
+                    type: offer.type,
+                    sdp: offer.sdp,
+                },
+                offerCandidates: [], // Initialize candidate arrays
+                answerCandidates: [],
+                createdAt: new Date().toISOString(),
+                callerId: userId,
+            });
+
+            // 3. Listen for Answer
+            // Wait for the remote peer to write the answer SDP
+            const unsubscribeAnswer = onSnapshot(callDoc, async (snapshot) => {
+                const data = snapshot.data();
+                if (data && data.answer && peerConnection.remoteDescription === null) {
+                    await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+                    updateStatus('Remote peer answered! Connection setup in progress...', 'info');
+                    // Stop listening for the answer once received
+                    unsubscribeAnswer();
+                }
+            });
+            unsubscribeCandidates.push(unsubscribeAnswer);
+        }
+
+        /**
+         * Joins an existing call by reading the offer, creating an answer, and writing it to Firestore.
+         */
+        async function joinCall() {
+            const callId = callIdInput.value.trim();
+            if (!callId) {
+                updateStatus('Please enter a Call ID to join.', 'error');
+                return;
+            }
+
+            const hasMedia = await setupLocalStream();
+            if (!hasMedia) return;
+
+            currentCallId = callId;
+            createCallButton.disabled = true;
+            answerCallButton.disabled = true;
+            hangupButton.disabled = false;
+            
+            updateStatus(`Attempting to join call ID: ${callId}...`, 'info');
+
+            const callDoc = doc(db, 'artifacts', appId, 'public', 'data', 'calls', callId);
+            const callSnapshot = await getDoc(callDoc);
+
+            if (!callSnapshot.exists() || !callSnapshot.data().offer) {
+                updateStatus('Error: Call ID not found or offer is missing.', 'error');
+                resetState();
+                return;
+            }
+            
+            setupPeerConnection(callId, false);
+            const callData = callSnapshot.data();
+            
+            // 1. Set Remote Offer Description
+            const offerDescription = new RTCSessionDescription(callData.offer);
+            await peerConnection.setRemoteDescription(offerDescription);
+            
+            // 2. Create Answer
+            const answer = await peerConnection.createAnswer();
+            await peerConnection.setLocalDescription(answer);
+
+            // 3. Write Answer to Firestore
+            const answerPayload = {
+                type: answer.type,
+                sdp: answer.sdp,
+            };
+
+            await updateDoc(callDoc, {
+                answer: answerPayload,
+                answererId: userId,
+            });
+            
+            updateStatus('Answer sent! Negotiating connection...', 'info');
+
+            // Set up listener for remote candidates already done in setupPeerConnection
+        }
+
+        /**
+         * Cleans up all resources and hangs up the call.
+         */
+        async function hangupCall() {
+            if (currentCallId) {
+                // Only the creator of the call should attempt to delete the doc to avoid conflicts
+                const callDoc = doc(db, 'artifacts', appId, 'public', 'data', 'calls', currentCallId);
+                const snapshot = await getDoc(callDoc);
+                if (snapshot.exists() && snapshot.data().callerId === userId) {
+                     await deleteCall(currentCallId);
+                     updateStatus('Call ended and cleaned up from server.', 'success');
+                } else {
+                     updateStatus('Call ended. The host will clean up the server data.', 'success');
+                }
+            }
+            resetState();
+        }
+
+        // === Initialization & Event Handlers ===
+
+        async function initFirebase() {
+            if (Object.keys(firebaseConfig).length === 0) {
+                updateStatus('Error: Firebase configuration is missing.', 'error');
+                return;
+            }
+            
+            try {
+                // Set debug level for firestore logging
+                setLogLevel('error'); // Use 'debug' or 'info' if detailed logging is needed
+                
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                
+                // Set persistence to session to maintain state across reloads
+                await setPersistence(auth, browserSessionPersistence);
+                
+                // Sign in using the custom token if provided, otherwise sign in anonymously
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+                
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        updateStatus(`Authenticated successfully. User ID: ${userId.substring(0, 8)}...`, 'info');
+                        // Enable buttons once auth is complete
+                        createCallButton.disabled = false;
+                        answerCallButton.disabled = false;
+                    } else {
+                        updateStatus('Authentication failed. Cannot proceed.', 'error');
+                    }
+                });
+
+            } catch (e) {
+                console.error('Firebase Initialization Error:', e);
+                updateStatus(`Firebase Init Error: ${e.message}`, 'error');
+            }
+        }
+
+        window.onload = () => {
+            initFirebase();
+            // Initial state: disable buttons until auth is ready
+            createCallButton.disabled = true;
+            answerCallButton.disabled = true;
+            
+            // Attach event listeners
+            createCallButton.addEventListener('click', createCall);
+            answerCallButton.addEventListener('click', joinCall);
+            hangupButton.addEventListener('click', hangupCall);
+            
+            // Ensure videos are visible even when paused
+            localVideo.onloadedmetadata = () => { localVideo.play(); };
+            remoteVideo.onloadedmetadata = () => { remoteVideo.play(); };
+
+            // Ensure we handle window closure
+            window.addEventListener('beforeunload', hangupCall);
+        };
+    </script>
 </body>
 </html>
